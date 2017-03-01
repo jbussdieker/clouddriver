@@ -17,6 +17,7 @@
 package com.netflix.spinnaker.clouddriver.aws.provider.agent
 
 import com.amazonaws.services.autoscaling.AmazonAutoScaling
+import com.amazonaws.services.autoscaling.model.AmazonAutoScalingException
 import com.amazonaws.services.autoscaling.model.AutoScalingGroup
 import com.amazonaws.services.autoscaling.model.DescribeAutoScalingGroupsRequest
 import com.amazonaws.services.autoscaling.model.DescribePoliciesRequest
@@ -302,12 +303,22 @@ class ClusterCachingAgent implements CachingAgent, OnDemandAgent, AccountAware, 
     }
     List<ScalingPolicy> scalingPolicies = []
     while (true) {
-      def resp = clients.autoScaling.describePolicies(request)
-      scalingPolicies.addAll(resp.scalingPolicies)
-      if (resp.nextToken) {
-        request.withNextToken(resp.nextToken)
-      } else {
-        break
+      try {
+        def resp = clients.autoScaling.describePolicies(request)
+        scalingPolicies.addAll(resp.scalingPolicies)
+        if (resp.nextToken) {
+          request.withNextToken(resp.nextToken)
+        } else {
+          break
+        }
+      } catch (AmazonAutoScalingException ex) {
+        if (ex.getMessage().contains("CloudWatchAlarm Rate exceeded")) {
+          logger.info("Armory: You've hit rate limits, taking a breather and then trying again")
+          logger.info("Armory:" + ex.getMessage())
+          Thread.currentThread().sleep(2000);
+        } else {
+          throw ex;
+        }
       }
     }
     def alarmNames = []
